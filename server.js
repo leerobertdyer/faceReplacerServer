@@ -18,13 +18,19 @@ const db = knex({
     }
 });
 
-//json translator now built in to express, still have to call it tho?:
+//json translator middleware:
 app.use(express.json());
+
 //cors is used to make cross-origin requests. Likely needed because the app uses Clarifai API to access images from other websites:
 app.use(cors())
-//setting the homepage response to 'database.users. I wonder if i'll change this to db.users:
+
+//setting the homepage response to current list of users:
 app.get('/', (req, res) => {
-    res.send(database.users)
+db.select('*').from('users')
+    .then(data => {
+        console.log(data)
+        res.json(data)
+    })
 })
 
 // signin handler. Checks email and password against database. 
@@ -57,8 +63,7 @@ app.post('/signin', (req, res) => {
 })
 
 
-// 'register' handler. Creates hash for password. 
-// Currently not saving password. Will need update
+// 'register' handler. Creates hash for password inserts into LOGIN and USERS using Transaction (TRX):
 app.post('/register', (req, res) => {
     const { name, email, password } = req.body;
     bcrypt.hash(password, 10, (err, hash) => {
@@ -87,7 +92,7 @@ app.post('/register', (req, res) => {
     });
 })
 
-// set up profile request handler to run through database and see if user matches current database:
+// currently unused, but could make your own profile showing all photos using this:
 app.get('/profile/:id', (req, res) => {
     const { id } = req.params;
     db.select('*').from('users').where('id', id)
@@ -101,6 +106,7 @@ app.get('/profile/:id', (req, res) => {
         })
 })
 
+//This is where we save photo urls, and update the entires
 app.put('/image', (req, res) => {
     const { id } = req.body;
     console.log('Received id:', id); // Log the received id
@@ -109,7 +115,6 @@ app.put('/image', (req, res) => {
         .increment('entries', 1)
         .returning('entries')
         .then(entries => {
-            console.log('Updated entries:', entries[0].entries);
             res.json(entries[0].entries);
         })
         .catch(error => {
