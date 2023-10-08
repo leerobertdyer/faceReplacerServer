@@ -1,112 +1,121 @@
 const express = require('express');
-const fs = require('fs');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcrypt');
 const app = express();
 const cors = require('cors')
+const knex = require('knex');
+const { user } = require('pg/lib/defaults');
 
+//setting up database with KNEX:
+const db = knex({
+    client: 'pg',
+    connection: {
+        host: '127.0.0.1',
+        port: 5432,
+        user: '',
+        password: '',
+        database: 'face-replacer'
+    }
+});
 
-const database = {
-    users: [
-        {
-            id: '123',
-            name: 'john',
-            password: 'cookies',
-            email: "john@gmail.com",
-            joined: new Date(),
-            entries: 0
-        },
-        {
-            id: '124',
-            name: 'suzy',
-            password: 'mumble',
-            email: "suzy@gmail.com",
-            joined: new Date(),
-            entries: 0
-        }
-    ],
-    login: [
-        {
-            id: '987',
-            hash: '',
-            email: 'john@gmail.com'
-        }
-    ]
-}
-
-
-app.use(bodyParser.json());
+//json translator now built in to express, still have to call it tho?:
+app.use(express.json());
+//cors is used to make cross-origin requests. Likely needed because the app uses Clarifai API to access images from other websites:
 app.use(cors())
+//setting the homepage response to 'database.users. I wonder if i'll change this to db.users:
 app.get('/', (req, res) => {
     res.send(database.users)
 })
 
+// signin handler. Checks email and password against database. 
 app.post('/signin', (req, res) => {
-    if (req.body.email === database.users[0].email &&
-        req.body.password === database.users[0].password) {
-        res.json(database.users[0])
-    }
-    else {
-        res.json('wrong login info...')
-    }
+    db.select("email", "hash").from('login')
+        .where("email", "=", req.body.email)
+        .then(data => {
+            bcrypt.compare(req.body.password, data[0].hash, function (err, result) {
+                if (result) {
+                    return db.select('*').from('users')
+                        .where('email', '=', req.body.email)
+                        .then(user => {
+                            res.json(user[0])
+                        })
+                        .catch(err => {
+                            res.status(400).json('unable to get user')
+                        })
+                }
+                else {
+                    res.status(400).json('Wrong Creds Bro')
+                }
+
+            });
+        })
+        .catch(err => {
+            res.status(400).json('wrong credentials')
+        })
+
+
 })
 
-let hashed;
+
+// 'register' handler. Creates hash for password. 
+// Currently not saving password. Will need update
 app.post('/register', (req, res) => {
     const { name, email, password } = req.body;
     bcrypt.hash(password, 10, (err, hash) => {
-        hashed = hash;
+        db.transaction(trx => {
+            trx.insert({
+                hash: hash,
+                email: email
+            }).into('login')
+                .returning('email')
+                .then(loginEmail => {
+                    return trx('users')
+                        .returning('*')
+                        .insert({
+                            email: loginEmail[0].email,
+                            name: name,
+                            joined: new Date()
+                        })
+                        .then(user => {
+                            res.json(user[0])
+                        }).catch(err => res.status(400).json('unable to register'))
+                })
+
+                .then(trx.commit)
+                .catch(trx.rollback)
+        })
     });
-    database.users.push(
-        {
-            id: 125,
-            name: name,
-            password: hashed,
-            email: email,
-            joined: new Date(),
-            entries: 0
-        }
-    );
-    console.log(database.users)
-    res.json(database.users[database.users.length - 1])
 })
 
-app.post('/signin', (req, res) => {
-    res.json('sign in')
-})
-
-
+// set up profile request handler to run through database and see if user matches current database:
 app.get('/profile/:id', (req, res) => {
     const { id } = req.params;
-    let found = false;
-    database.users.forEach(user => {
-        if (user.id === id) {
-            found = true;
-            return res.json(user)
-        }
-    })
-    if (!found) {
-        res.status(404).json('no such user')
-    }
+    db.select('*').from('users').where('id', id)
+        .then(user => {
+            if (user.length) {
+                res.json(user[0])
+            } else {
+                res.status(400).json('no such user')
+            }
+
+        })
 })
 
-app.put('/image', (req, res) =>{
+app.put('/image', (req, res) => {
     const { id } = req.body;
-    let found = false;
-    database.users.forEach(user => {
-        if (user.id === id) {
-            found = true;
-            user.entries++
-            return res.json(user.entries)
-        }
-    })
-    if (!found) {
-        res.status(404).json('no such user')
-    }
-})
-
- 
-
+    console.log('Received id:', id); // Log the received id
+    db('users')
+        .where('id', '=', id)
+        .increment('entries', 1)
+        .returning('entries')
+        .then(entries => {
+            console.log('Updated entries:', entries[0].entries);
+            res.json(entries[0].entries);
+        })
+        .catch(error => {
+            res.status(400).json({ error: 'Unable to get entries.' });
+        });
+});
 
 
 
