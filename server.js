@@ -24,13 +24,16 @@ app.use(express.json());
 //cors is used to make cross-origin requests. Likely needed because the app uses Clarifai API to access images from other websites:
 app.use(cors())
 
+
+// **********    HANDLERS    ********** //
+
 //setting the homepage response to current list of users:
 app.get('/', (req, res) => {
-db.select('*').from('users')
-    .then(data => {
-        console.log(data)
-        res.json(data)
-    })
+    db.select('*').from('users')
+        .then(data => {
+            console.log(data)
+            res.json(data)
+        })
 })
 
 // signin handler. Checks email and password against database. 
@@ -92,37 +95,57 @@ app.post('/register', (req, res) => {
     });
 })
 
-// currently unused, but could make your own profile showing all photos using this:
+// Profile Handler:
 app.get('/profile/:id', (req, res) => {
     const { id } = req.params;
-    db.select('*').from('users').where('id', id)
+    db.select('url').from('photos').where('user_id', id)
         .then(user => {
             if (user.length) {
-                res.json(user[0])
-            } else {
-                res.status(400).json('no such user')
-            }
+                const uniqueUrls = new Set();
+                const removeDuplicates = user.filter(item => {
+                    if (!uniqueUrls.has(item.url)) {
+                        uniqueUrls.add(item.url);
+                        return true;
+                    }
+                    return false;
+                });
 
+                res.json(removeDuplicates);
+            } else {
+                res.status(400).json('no submissions')
+            }
         })
 })
 
 //This is where we save photo urls, and update the entires
 app.put('/image', (req, res) => {
-    const { id } = req.body;
-    console.log('Received id:', id); // Log the received id
-    db('users')
-        .where('id', '=', id)
-        .increment('entries', 1)
-        .returning('entries')
-        .then(entries => {
-            res.json(entries[0].entries);
-        })
-        .catch(error => {
-            res.status(400).json({ error: 'Unable to get entries.' });
+    const { id, url } = req.body;
+    db.transaction(trx => {
+        trx
+            .insert({
+                user_id: id,
+                url: url
+            })
+            .into('photos')
+            .then(() => {
+                return trx('users')
+                    .where('id', '=', id)
+                    .increment('entries', 1)
+                    .returning('entries');
+            })
+            .then(entries => {
+                res.json(entries[0]);
+            })
+            .then(trx.commit)
+            .catch(err => {
+                trx.rollback();
+                res.status(400).json({ error: 'Transaction failed.' });
+            });
+    })
+        .catch(err => {
+            res.status(400).json({ error: 'Transaction failed.' });
         });
 });
-
-
 
 app.listen(3001, () => {
     console.log('app is running on port 3001')
