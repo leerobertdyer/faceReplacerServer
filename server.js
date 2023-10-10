@@ -120,31 +120,41 @@ app.get('/profile/:id', (req, res) => {
 //This is where we save photo urls, and update the entires
 app.put('/image', (req, res) => {
     const { id, url } = req.body;
-    db.transaction(trx => {
-        trx
-            .insert({
-                user_id: id,
-                url: url
-            })
-            .into('photos')
-            .then(() => {
-                return trx('users')
-                    .where('id', '=', id)
-                    .increment('entries', 1)
-                    .returning('entries');
-            })
-            .then(entries => {
-                res.json(entries[0]);
-            })
-            .then(trx.commit)
-            .catch(err => {
-                trx.rollback();
-                res.status(400).json({ error: 'Transaction failed.' });
-            });
-    })
-        .catch(err => {
-            res.status(400).json({ error: 'Transaction failed.' });
-        });
+    db.select('*')
+        .from('photos')
+        .where({ 'user_id': id, 'url': url })
+        .then(existingURL => {
+            if (existingURL.length > 0) {
+                return res.json('Url already submitted')
+            } else {
+                return db.transaction(trx => {
+                    trx
+                        .insert({
+                            user_id: id,
+                            url: url
+                        })
+                        .into('photos')
+                        .then(() => {
+                            return trx('users')
+                                .where('id', '=', id)
+                                .increment('entries', 1)
+                                .returning('entries');
+                        })
+                        .then(entries => {
+                            res.json(entries[0]);
+                        })
+                        .then(trx.commit)
+                        .catch(err => {
+                            trx.rollback();
+                            res.status(400).json({ error: 'Transaction failed.' });
+                        });
+                })
+                    .catch(err => {
+                        res.status(400).json({ error: 'Transaction failed.' });
+                    });
+            }
+        })
+
 });
 
 app.listen(3001, () => {
