@@ -2,11 +2,13 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcrypt');
 const app = express();
-const cors = require('cors')
+const cors = require('cors');
 const knex = require('knex');
 const { user } = require('pg/lib/defaults');
+const session = require('express-session');
+const KnexSessionStore = require('connect-session-knex')(session);
 
-//setting up database with KNEX:
+//setting up main database with KNEX:
 const db = knex({
     client: 'pg',
     connection: {
@@ -18,8 +20,37 @@ const db = knex({
     }
 });
 
+// setting up session db with KNEX 
+//Does not appear to work. Will need to go further into the documentation...
+const sessiondb = knex({
+    client: 'pg',
+    connection: {
+        host: '127.0.0.1',
+        port: 5432,
+        user: '',
+        password: '',
+        database: 'sessiondb'
+    }
+})
+
+const store = new KnexSessionStore({
+    sessiondb,
+    tablename: 'sessions', 
+  });
+ 
 //json translator middleware:
 app.use(express.json());
+
+//express session keeps track of user logins and stores them so they don't get logged out on a refresh
+// ****NOTE**** I'll need to make the "secret" actually secret by using .env (not sure what that is yet)
+app.use(session({
+    secret: 'Tomato', 
+    resave: false,            
+    saveUninitialized: true,   
+    cookie: { maxAge: 100000 },
+    store,
+    }),
+    );   
 
 //cors is used to make cross-origin requests. Likely needed because the app uses Clarifai API to access images from other websites:
 app.use(cors())
